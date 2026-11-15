@@ -2,20 +2,19 @@ package pg
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func CreateAuthTable(ctx context.Context, db *pgx.Conn) error {
-	query := `
-CREATE TABLE IF NOT EXISTS products (
-    id SERIAL PRIMARY KEY,
-    model VARCHAR(100) NOT NULL,
-    price NUMERIC(10, 2) NOT NULL
-);`
-	_, err := db.Exec(ctx, query)
+func CreatePool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("create pool: %w", err)
 	}
-	return nil
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return pool, nil
 }

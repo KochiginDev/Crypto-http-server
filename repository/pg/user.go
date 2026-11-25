@@ -35,9 +35,9 @@ func (r *UserRepo) Create(ctx context.Context, username string, passwordHash str
 }
 
 func (r *UserRepo) GetByName(ctx context.Context, username string) (domain.User, error) {
-	query := "SELECT id, username, password_hash, COALESCE(token, '') FROM users WHERE username = $1"
+	query := "SELECT id, username, password_hash FROM users WHERE username = $1"
 	var user domain.User
-	err := r.pool.QueryRow(ctx, query, username).Scan(&user.Id, &user.Username, &user.PasswordHash, &user.Token)
+	err := r.pool.QueryRow(ctx, query, username).Scan(&user.Id, &user.Username, &user.PasswordHash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.User{}, domain.ErrNotFound
@@ -45,30 +45,4 @@ func (r *UserRepo) GetByName(ctx context.Context, username string) (domain.User,
 		return domain.User{}, fmt.Errorf("get user by name: %w", err)
 	}
 	return user, nil
-}
-
-func (r *UserRepo) GetByToken(ctx context.Context, token string) (domain.User, error) {
-	query := "SELECT id, username, password_hash, COALESCE(token, '') FROM users WHERE token = $1"
-	var user domain.User
-	err := r.pool.QueryRow(ctx, query, token).Scan(&user.Id, &user.Username, &user.PasswordHash, &user.Token)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.User{}, domain.ErrNotFound
-		}
-		return domain.User{}, fmt.Errorf("get user by token: %w", err)
-	}
-	return user, nil
-}
-
-func (r *UserRepo) SaveNewToken(ctx context.Context, id int64, token string) error {
-	query := "UPDATE users SET token = $1 WHERE id = $2"
-	tag, err := r.pool.Exec(ctx, query, token, id)
-	if err != nil {
-		return fmt.Errorf("save token: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return domain.ErrNotFound
-	}
-
-	return nil
 }

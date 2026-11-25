@@ -14,7 +14,7 @@ import (
 )
 
 func testAuth(ctx context.Context, pool *pgxpool.Pool) {
-	svc := service.NewAuthService(pg.NewUserRepo(pool))
+	svc := service.NewAuthService(pg.NewUserRepo(pool), []byte("test-secret"), time.Hour)
 	name := fmt.Sprintf("auth_%d", time.Now().UnixNano())
 
 	tok, err := svc.Register(ctx, name, "secret123")
@@ -33,10 +33,8 @@ func testAuth(ctx context.Context, pool *pgxpool.Pool) {
 	fmt.Printf("a5 check token: id=%d name=%s err=%v\n", u.Id, u.Username, err)
 
 	tok2, err := svc.Login(ctx, name, "secret123")
-	fmt.Println("a6 login: new token differs:", tok2 != tok, "err:", err)
+	fmt.Println("a6 login: err:", err)
 
-	_, err = svc.CheckToken(ctx, tok)
-	fmt.Println("a7 old token -> ErrInvalidCredentials:", errors.Is(err, domain.ErrInvalidCredentials))
 	_, err = svc.CheckToken(ctx, tok2)
 	fmt.Println("a8 new token err:", err)
 
@@ -48,6 +46,9 @@ func testAuth(ctx context.Context, pool *pgxpool.Pool) {
 	fmt.Println("a11 empty password -> ErrInvalidInput:", errors.Is(err, domain.ErrInvalidInput))
 	_, err = svc.CheckToken(ctx, "")
 	fmt.Println("a12 empty token -> ErrInvalidCredentials:", errors.Is(err, domain.ErrInvalidCredentials))
+	_, err = svc.CheckToken(ctx, "abc")
+	fmt.Println("a13:", errors.Is(err, domain.ErrInvalidCredentials))
+	
 }
 func testCrypto(ctx context.Context, pool *pgxpool.Pool) {
 	repo := pg.NewCryptoRepo(pool)
@@ -102,7 +103,7 @@ func testCrypto(ctx context.Context, pool *pgxpool.Pool) {
 }
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	dsn := "postgres://postgres:mypassword@localhost:5432/productdb"
@@ -115,7 +116,6 @@ func main() {
 
 	repo := pg.NewUserRepo(pool)
 	name := fmt.Sprintf("scratch_%d", time.Now().UnixNano())
-	token := "tok_" + name
 
 	u, err := repo.Create(ctx, name, "hash")
 	fmt.Printf("1 create: %+v err=%v\n", u, err)
@@ -124,22 +124,11 @@ func main() {
 	fmt.Println("2 duplicate -> ErrAlreadyExists:", errors.Is(err, domain.ErrAlreadyExists))
 
 	u, err = repo.GetByName(ctx, name)
-	fmt.Printf("3 get by name: %+v err=%v, token empty: %v\n", u, err, u.Token == "")
+	fmt.Printf("3 get by name: %+v err=%v", u, err)
 
 	_, err = repo.GetByName(ctx, "no_such_user")
 	fmt.Println("4 unknown name -> ErrNotFound:", errors.Is(err, domain.ErrNotFound))
 
-	err = repo.SaveNewToken(ctx, u.Id, token)
-	fmt.Println("5 save token err:", err)
-
-	u, err = repo.GetByToken(ctx, token)
-	fmt.Printf("6 get by token: %+v err=%v\n", u, err)
-
-	_, err = repo.GetByToken(ctx, "wrong")
-	fmt.Println("7 unknown token -> ErrNotFound:", errors.Is(err, domain.ErrNotFound))
-
-	err = repo.SaveNewToken(ctx, 999999, "x")
-	fmt.Println("8 unknown id -> ErrNotFound:", errors.Is(err, domain.ErrNotFound))
 	testCrypto(ctx, pool)
 	testAuth(ctx, pool)
 }

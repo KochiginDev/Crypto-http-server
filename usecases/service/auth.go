@@ -4,30 +4,39 @@ import (
 	"context"
 	"crypthttp/domain"
 	"crypthttp/repository"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService struct {
-	User repository.User
+	User   repository.User
+	secret []byte
+	Living time.Duration
 }
 
-func NewAuthService(user repository.User) *AuthService {
-	return &AuthService{User: user}
+func NewAuthService(user repository.User, secret []byte, life time.Duration) *AuthService {
+	return &AuthService{User: user, secret: secret, Living: life}
 }
-func (service *AuthService) generateToken() (string, error) {
-	temp := make([]byte, 32)
-	_, err := rand.Read(temp)
-	if err != nil {
-		return "", fmt.Errorf("create token: %w", err)
+func (service *AuthService) generateToken(us domain.User) (string, error) {
+	now := time.Now()
+	mp := jwt.MapClaims{
+		"sub":      strconv.FormatInt(us.Id, 10),
+		"username": us.Username,
+		"iat":      now.Unix(),
+		"exp":      now.Add(service.Living).Unix(),
 	}
-	token := hex.EncodeToString(temp)
-	return token, nil
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, mp)
+	str, err := token.SignedString(service.secret)
+	if err != nil {
+		return "", fmt.Errorf("signed string: %w", err)
+	}
+	return str, nil
 }
 func (service *AuthService) Register(ctx context.Context, username string, password string) (string, error) {
 	if len(password) > 50 {
@@ -53,13 +62,9 @@ func (service *AuthService) Register(ctx context.Context, username string, passw
 		return "", fmt.Errorf("create user: %w", err)
 	}
 
-	token, err := service.generateToken()
+	token, err := service.generateToken(us)
 	if err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
-	}
-	err = service.User.SaveNewToken(ctx, us.Id, token)
-	if err != nil {
-		return "", fmt.Errorf("save new token: %w", err)
 	}
 	return token, nil
 }
@@ -87,13 +92,9 @@ func (service *AuthService) Login(ctx context.Context, username string, password
 		}
 		return "", fmt.Errorf("compare password: %w", err)
 	}
-	token, err := service.generateToken()
+	token, err := service.generateToken(us)
 	if err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
-	}
-	err = service.User.SaveNewToken(ctx, us.Id, token)
-	if err != nil {
-		return "", fmt.Errorf("save new token: %w", err)
 	}
 	return token, nil
 }
@@ -102,12 +103,26 @@ func (service *AuthService) CheckToken(ctx context.Context, token string) (domai
 	if len(token) == 0 {
 		return domain.User{}, domain.ErrInvalidCredentials
 	}
-	us, err := service.User.GetByToken(ctx, token)
+	hs, err := jwt.Parse(token, func(t *jwt.Token) (any, error) { return service.secret, nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return domain.User{}, domain.ErrInvalidCredentials
-		}
-		return domain.User{}, fmt.Errorf("check token: %w", err)
+		return domain.User{}, domain.ErrInvalidCredentials
 	}
-	return us, nil
+	claims, ok := hs.Claims.(jwt.MapClaims)
+	if !ok {
+		return domain.User{}, domain.ErrInvalidCredentials
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok {
+		return domain.User{}, domain.ErrInvalidCredentials
+	}
+	id, err := strconv.ParseInt(sub, 10, 64)
+	if err != nil {
+		return domain.User{}, domain.ErrInvalidCredentials
+	}
+	username, ok := claims["username"].(string)
+	if !ok {
+		return domain.User{}, domain.ErrInvalidCredentials
+	}
+	return domain.User{Id: id, Username: username}, nil
+
 }

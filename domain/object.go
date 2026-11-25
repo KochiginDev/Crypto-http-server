@@ -9,7 +9,6 @@ type User struct {
 	Id           int64  `json:"id"`
 	Username     string `json:"username"`
 	PasswordHash string `json:"-"`
-	Token        string `json:"-"`
 }
 type Crypto struct {
 	Symbol       string    `json:"symbol"`
